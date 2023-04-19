@@ -30,7 +30,8 @@ A module to communicate with the Spike Hub using JSON RPC. Can be used to manage
 
 ```
 usage: spikejsonrpcapispike.py [-h] [-t TTY] [--debug]
-                       {list,ls,fwinfo,mv,upload,cp,rm,start,stop,display} ...
+                               {list,ls,fwinfo,mv,upload,cp,rm,start,stop,display}
+                               ...
 
 Tools for Spike Hub RPC protocol
 
@@ -39,13 +40,13 @@ positional arguments:
     list (ls)           List stored programs
     fwinfo              Show firmware version
     mv                  Changes program slot
-    upload (cp)         Uploads a program
+    upload (cp)         Uploads a program and stats it. Default slot is 0
     rm                  Removes the program at a given slot
     start               Starts a program
     stop                Stop program execution
-    display             Displays image on the LED matrix
+    display             Controls 5x5 LED matrix display
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
   -t TTY, --tty TTY     Spike Hub device path
   --debug               Enable debug
@@ -53,10 +54,11 @@ optional arguments:
 
 The programs launched with the default launcher need to be expressed in coroutines so they can be
 exited properly. `hub/program_template.py` is an example skeleton program handling initialization.
-It can be uploaded with:
+It can be uploaded and executed with:
 ```sh
-sudo ./spikejsonrpc.py upload hub/program_template.py 19
+sudo ./spikejsonrpc.py upload hub/program_template.py
 ```
+A slot can be specified, e.g., with `--to_slot 3`. And the execution can be skipped with `--no_start`.
 
 ## cp.py
 Copy a file to the hub filesystem.

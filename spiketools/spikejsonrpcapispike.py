@@ -54,10 +54,20 @@ class RPC:
     self.ser.write(b'\x0D')
     return self.recv_response(id)
 
+  def send_empty(self, id):
+    while True:
+      if not self.recv_message(timeout=0):
+        break
+    msg = {'i': id, 'r': None}
+    msg_string = json.dumps(msg)
+    logging.debug('sending: %s' % msg_string)
+    self.ser.write(msg_string.encode('utf-8'))
+    self.ser.write(b'\x0D')
+
   def recv_response(self, id):
     while True:
       m = self.recv_message()
-      if 'i' in m and m['i'] == id:
+      if not m is None and 'i' in m and m['i'] == id:
         logging.debug('response: %s' % m)
         if 'e' in m:
           error = json.loads(base64.b64decode(m['e']).decode('utf-8'))
@@ -65,9 +75,45 @@ class RPC:
         return m['r']
       logging.debug('while waiting for response: %s' % m)
 
+  def continued_reading(self, id):
+    while True:
+      m = self.recv_message()
+      if m is None or not 'm' in m:  # keine Nachricht
+        continue
+      elif m['m'] in [0, 2, 4]:  # Gyroskop-Spam ignorieren
+        continue
+      elif m['m'] == 3 and 'p' in m and len(m['p']) == 2:  # Button
+        ms = m['p'][1]
+        if ms == 0:
+          print(f"Schalter wurde gedrückt.")
+        else:
+          print(f"Schalter wurde nach {ms}ms losgelassen.")
+      elif m['m'] == 12 and 'p' in m and len(m['p']) == 2:  # Program-Status
+        running = m['p'][1]
+        if not running:
+          print(f"Programm wurde beendet")
+          break
+      elif m['m'] == 'userProgram.print' and 'p' in m and 'value' in m['p']:  # Print
+        try:
+          print(base64.b64decode(m['p']['value']).decode('utf-8'), end="")
+          self.send_empty(m['i'])  #response to not produce an error
+        except:
+          print("Error decoding print-json:", m['p']['value'])
+      elif m['m'] == 'user_program_error' and 'p' in m and len(m['p']) == 5:  # Error
+        try:
+          print(base64.b64decode(m['p'][3]).decode('utf-8'))
+          print(base64.b64decode(m['p'][4]).decode('utf-8'))
+        except:
+          print("Error decoding error-json:", m)
+      else:
+        print("Unknown message format:", m)
+
+
+
 # Program Methods
   def program_execute(self, n):
-    return self.send_message('program_execute', {'slotid': n})
+    self.send_message('program_execute', {'slotid': n})
+    self.continued_reading(n)
 
   def program_terminate(self):
     return self.send_message('program_terminate')
@@ -160,7 +206,7 @@ if __name__ == "__main__":
           rpc.write_package(b, id)
           pbar.update(len(b))
           b = f.read(bs)
-      if args.start:
+      if not args.no_start:
         rpc.program_execute(args.to_slot)
 
   parser = argparse.ArgumentParser(description='Tools for Spike Hub RPC protocol')
@@ -180,11 +226,11 @@ if __name__ == "__main__":
   mvprogram_parser.add_argument('to_slot', type=int)
   mvprogram_parser.set_defaults(func=lambda: rpc.move_project(args.from_slot, args.to_slot))
 
-  cpprogram_parser = sub_parsers.add_parser('upload', aliases=['cp'], help='Uploads a program')
+  cpprogram_parser = sub_parsers.add_parser('upload', aliases=['cp'], help='Uploads a program and stats it. Default slot is 0')
   cpprogram_parser.add_argument('file')
-  cpprogram_parser.add_argument('to_slot', type=int)
   cpprogram_parser.add_argument('name', nargs='?')
-  cpprogram_parser.add_argument('--start', '-s', help='Start after upload', action='store_true')
+  cpprogram_parser.add_argument('--to_slot', type=int, default=0)
+  cpprogram_parser.add_argument('--no_start', '-n', help='Do not start after upload', action='store_true')
   cpprogram_parser.set_defaults(func=handle_upload)
 
   rmprogram_parser = sub_parsers.add_parser('rm', help='Removes the program at a given slot')
