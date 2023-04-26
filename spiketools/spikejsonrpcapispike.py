@@ -37,7 +37,7 @@ class RPC:
       c = self.ser.in_waiting
       if c == 0 and elapsed >= timeout:
         break
-      self.ser.timeout = 1 - timeout
+      self.ser.timeout = 1
       self.recv_buf = self.recv_buf + self.ser.read(c if c else 1)
       elapsed = time.time() - start_time
     return None
@@ -90,8 +90,8 @@ class RPC:
           print(f"Schalter wurde nach {ms}ms losgelassen.")
       elif m['m'] == 12 and 'p' in m and len(m['p']) == 2:  # Program-Status
         running = m['p'][1]
-        if not running:
-          print(f"Programm wurde beendet")
+        if not running and not m['p'][0] is None:
+          print(f"Programm wurde beendet", m)
           break
       elif m['m'] == 'userProgram.print' and 'p' in m and 'value' in m['p']:  # Print
         try:
