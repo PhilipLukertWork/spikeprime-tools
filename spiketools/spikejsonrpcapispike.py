@@ -19,7 +19,10 @@ def random_id(len = 4):
 
 class RPC:
   def __init__(self, tty = '/dev/ttyACM0'):
-    self.ser = serial.Serial(tty, 115200)
+    try:
+      self.ser = serial.Serial(tty, 115200)
+    except Exception as e:
+      self.exitSerial(0)
     self.recv_buf = bytearray()
 
   def recv_message(self, timeout = 1):
@@ -34,11 +37,15 @@ class RPC:
           return json.loads(result.decode('utf-8'))
         except json.JSONDecodeError:
           logging.debug("Cannot parse JSON: %s" % result)
-      c = self.ser.in_waiting
-      if c == 0 and elapsed >= timeout:
-        break
-      self.ser.timeout = 1
-      self.recv_buf = self.recv_buf + self.ser.read(c if c else 1)
+      try:
+        c = self.ser.in_waiting
+        if c == 0 and elapsed >= timeout:
+          break
+        self.ser.timeout = 1
+        self.recv_buf += self.ser.read(c if c else 1)
+      except Exception as e:
+        self.exitSerial(1)
+        
       elapsed = time.time() - start_time
     return None
 
@@ -50,8 +57,11 @@ class RPC:
     msg = {'m':name, 'p': params, 'i': id}
     msg_string = json.dumps(msg)
     logging.debug('sending: %s' % msg_string)
-    self.ser.write(msg_string.encode('utf-8'))
-    self.ser.write(b'\x0D')
+    try:
+      self.ser.write(msg_string.encode('utf-8'))
+      self.ser.write(b'\x0D')
+    except Exception as e:
+      self.exitSerial(2)
     return self.recv_response(id)
 
   def send_empty(self, id):
@@ -61,8 +71,11 @@ class RPC:
     msg = {'i': id, 'r': None}
     msg_string = json.dumps(msg)
     logging.debug('sending: %s' % msg_string)
-    self.ser.write(msg_string.encode('utf-8'))
-    self.ser.write(b'\x0D')
+    try:
+      self.ser.write(msg_string.encode('utf-8'))
+      self.ser.write(b'\x0D')
+    except Exception as e:
+      self.exitSerial(3)
 
   def recv_response(self, id):
     while True:
@@ -71,7 +84,9 @@ class RPC:
         logging.debug('response: %s' % m)
         if 'e' in m:
           error = json.loads(base64.b64decode(m['e']).decode('utf-8'))
-          raise ConnectionError(error)
+          #raise ConnectionError(error)
+          print(error)
+          exit(0)
         return m['r']
       logging.debug('while waiting for response: %s' % m)
 
@@ -108,6 +123,20 @@ class RPC:
       else:
         print("Unknown message format:", m)
 
+  def exitSerial(self, errorId, extraMessage = ""):
+    try:
+      if not self.ser is None:
+        self.ser.close()
+    except AttributeError:
+      pass
+    except:
+      print("Fehler beim schließen der USB-Verbindung")
+    if (errorId == -1):
+      print("Fehler beim Lesen der Datei, die auf den Spike geladen werden soll. Rufe einen Betreuer")
+      print(e)
+    else:
+      print(f"USB-Fehler({errorId}): Ziehe das Kabel heraus und stecke es nach 5s neu ein")
+    exit(0)
 
 
 # Program Methods
@@ -193,21 +222,24 @@ if __name__ == "__main__":
     print("Firmware version: %s; Runtime version: %s" % (fw, rt))
   
   def handle_upload():
-    with open(args.file, "rb") as f:
-      size = os.path.getsize(args.file)
-      name = args.name if args.name else args.file
-      now = int(time.time() * 1000)
-      start = rpc.start_write_program(name, size, args.to_slot, now, now)
-      bs = start['blocksize']
-      id = start['transferid']
-      with tqdm(total=size, unit='B', unit_scale=True) as pbar:
-        b = f.read(bs)
-        while b:
-          rpc.write_package(b, id)
-          pbar.update(len(b))
+    try:
+      with open(args.file, "rb") as f:
+        size = os.path.getsize(args.file)
+        name = args.name if args.name else args.file
+        now = int(time.time() * 1000)
+        start = rpc.start_write_program(name, size, args.to_slot, now, now)
+        bs = start['blocksize']
+        id = start['transferid']
+        with tqdm(total=size, unit='B', unit_scale=True) as pbar:
           b = f.read(bs)
-      if not args.no_start:
-        rpc.program_execute(args.to_slot)
+          while b:
+            rpc.write_package(b, id)
+            pbar.update(len(b))
+            b = f.read(bs)
+        if not args.no_start:
+          rpc.program_execute(args.to_slot)
+    except IOError as e:
+      rpc.exitSerial(-1, e);
 
   parser = argparse.ArgumentParser(description='Tools for Spike Hub RPC protocol')
   parser.add_argument('-t', '--tty', help='Spike Hub device path', default='/dev/ttyACM0')
